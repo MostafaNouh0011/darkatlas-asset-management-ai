@@ -13,7 +13,7 @@ router = APIRouter(prefix="/import", tags=["import"])
 def bulk_import(records: list[dict], db: Session = Depends(get_db)):
     """
     Bulk import endpoint. Accepts the sample dataset (a JSON list of asset
-    records) directly — see Appendix A of the task doc for the shape.
+    records) directly.
 
     Idempotent: re-posting the same list will not create duplicates; it
     updates last_seen and merges tags/metadata on existing assets instead.

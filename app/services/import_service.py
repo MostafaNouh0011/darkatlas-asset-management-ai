@@ -1,10 +1,10 @@
 """
 Import logic: dedup, merge, lifecycle transitions, relationship extraction.
 
-This is the highest-weighted piece of the rubric for the data-handling side
-(Section 7 edge cases), so the logic is kept explicit and readable rather
-than clever — you should be able to explain every branch here in the
-interview without notes.
+The logic here is kept explicit and readable rather than clever — every
+branch corresponds to a stated invariant documented in the README
+(idempotency, tag-union, last-write-wins for metadata, stale -> active
+re-sighting, per-record validation that does not fail the batch).
 """
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -28,11 +28,11 @@ def merge_tags(existing: list[str], incoming: list[str]) -> list[str]:
 def merge_metadata(existing: dict, incoming: dict) -> dict:
     """Shallow merge: incoming wins on key conflicts.
 
-    Stated assumption (put this in the README): when two sources disagree on
+    Stated assumption (documented in the README): when two sources disagree on
     the same metadata key (e.g. cert expiry reported differently by two
     scans), the most recently imported value wins. This is a simple,
     defensible default — a more sophisticated system might track per-source
-    values and surface the conflict, but that's out of scope for a 1-week task.
+    values and surface the conflict explicitly.
     """
     result = dict(existing)
     result.update(incoming)
@@ -55,7 +55,7 @@ def import_assets(db: Session, raw_records: list[dict]) -> ImportResult:
     now = datetime.now(timezone.utc)
 
     for raw in raw_records:
-        # Malformed/partial records must not crash the batch (Section 7).
+        # Malformed/partial records must not crash the batch.
         try:
             record = AssetIn.model_validate(raw)
         except ValidationError as e:
@@ -83,7 +83,7 @@ def import_assets(db: Session, raw_records: list[dict]) -> ImportResult:
             existing.last_seen = now
             existing.tags = merge_tags(existing.tags, record.tags)
             existing.asset_metadata = merge_metadata(existing.asset_metadata, record.metadata)
-            # Stale asset seen again -> back to active (Section 7).
+            # Stale asset seen again -> back to active.
             if existing.status == "stale":
                 existing.status = "active"
             updated += 1

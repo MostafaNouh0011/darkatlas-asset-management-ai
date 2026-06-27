@@ -3,11 +3,11 @@ Pydantic schemas.
 
 These serve two jobs:
 1. Validate API input/output (the normal FastAPI use case).
-2. Later, in the LangChain layer (Day 2+), structures like AssetFilter below
-   become the "structured output" target you ask the LLM to fill in. The LLM
+2. Act as the "structured output" target for the LangChain layer. Structures
+   like AssetFilter below are what the LLM is asked to fill in. The LLM
    never queries the DB directly — it only ever fills in a schema like
-   AssetFilter, and your own code applies that filter to real rows. That
-   indirection is your main anti-hallucination guardrail.
+   AssetFilter, and application code applies that filter to real rows.
+   That indirection is the main anti-hallucination guardrail.
 """
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, Literal
@@ -20,9 +20,9 @@ AssetStatus = Literal["active", "stale", "archived"]
 class AssetIn(BaseModel):
     """Shape of one record in the bulk import payload.
 
-    Deliberately permissive on optional fields — Section 7 of the task asks us
-    to handle malformed/partial records gracefully rather than reject the
-    whole batch, so only the fields we truly cannot proceed without
+    Deliberately permissive on optional fields so the import endpoint can
+    handle malformed/partial records gracefully rather than reject the
+    whole batch. Only the fields we truly cannot proceed without
     (id, type, value) are required.
     """
     id: str
@@ -71,11 +71,11 @@ class ImportResult(BaseModel):
 
 
 class AssetFilter(BaseModel):
-    """Structured target for the NL-query LangChain chain (built Day 2).
+    """Structured target for the NL-query LangChain chain.
 
     All fields optional/None-able: the LLM fills in only what the question
-    implies. Your own filter logic (not the LLM) then applies this against
-    real DB rows.
+    implies. Application filter logic (not the LLM) then applies this
+    against real DB rows.
     """
     type: Optional[AssetType] = None
     status: Optional[AssetStatus] = None

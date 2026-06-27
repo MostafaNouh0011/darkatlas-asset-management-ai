@@ -1,10 +1,10 @@
 """
 Lightweight API key auth on write operations.
 
-This satisfies the "lightweight authentication" requirement without pulling
-in a full OAuth/JWT setup, which would be disproportionate for a 1-week
-minimal-API track. State this choice explicitly in the README as a
-deliberate scope decision.
+This satisfies the "writes require authentication" requirement without pulling
+in a full OAuth/JWT setup, which would be disproportionate for an internal
+API of this scope. This choice is documented in the README as a deliberate
+scope decision.
 """
 import os
 from fastapi import Header, HTTPException, status

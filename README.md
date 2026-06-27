@@ -1,6 +1,8 @@
-# Buguard Asset Management — AI Applications Track
+# Buguard Asset Management — AI Layer
 
-A minimal asset management API with a LangChain-powered analysis layer, built for the Buguard AI Internship technical assessment.
+Originally built as a technical assessment for the Buguard AI Internship Program.
+
+A small asset management API with a LangChain-powered analysis layer, demonstrating API design, data-handling discipline, and grounded LLM integration.
 
 ## What this is
 
@@ -12,11 +14,12 @@ A minimal asset management API with a LangChain-powered analysis layer, built fo
 
 ```bash
 git clone <this-repo>
-cd buguard-asset-mgmt
+cd darkatlas-asset-management-ai
 cp .env.example .env
-# edit .env and set GOOGLE_API_KEY (the project uses Gemini 2.5 Flash via
-# langchain-google-genai; to use a different provider, swap the import in
-# app/services/analysis_service.py — see the swap-in note at the top of that file)
+# edit .env and set GOOGLE_API_KEY (the project runs on Gemini 2.5 Flash via
+# langchain-google-genai; the LLM layer is intentionally provider-agnostic —
+# to use a different provider, swap the import in app/services/analysis_service.py
+# — see the swap-in note at the top of that file)
 docker-compose up --build
 ```
 
@@ -32,6 +35,8 @@ curl -X POST http://localhost:8000/import \
 ```
 
 (Use whatever value you set for `API_KEY` in `.env`.)
+
+![Loading the sample dataset via /import](docs/load_sample_data.png)
 
 ## Running tests
 
@@ -50,17 +55,17 @@ Tests run against an in-memory SQLite database, so they don't require Docker or 
 
 **Idempotent import**: assets are upserted by their natural `id` (not re-derived or guessed). Re-importing the same data updates `last_seen` and merges `tags`/`metadata` rather than creating duplicates.
 
-**Merge strategy on conflicting data**: when two sources report different values for the same metadata key, the most recently imported value wins (last-write-wins). Tags are unioned, never overwritten. This is a simple, defensible default for the scope of this task — a production system might instead track per-source values and surface conflicts explicitly rather than silently resolving them.
+**Merge strategy on conflicting data**: when two sources report different values for the same metadata key, the most recently imported value wins (last-write-wins). Tags are unioned, never overwritten. This is a simple, defensible default for the scope of this project — a production system might instead track per-source values and surface conflicts explicitly rather than silently resolving them.
 
 **Stale → active lifecycle**: if an asset with `status=stale` is seen again in a later import, it flips back to `active`. This reflects the real-world case where a previously-dormant asset (e.g. a subdomain that stopped resolving) becomes live again.
 
 **Malformed records don't fail the batch**: each record in an import payload is validated independently. Invalid records (missing required fields, unknown `type` values) are skipped and reported back in the response (`skipped: [...]`), while valid records in the same batch are still processed.
 
-**Authentication**: a lightweight shared-secret API key (`X-API-Key` header) protects the write endpoint (`/import`). This was a deliberate scope decision — a full JWT/OAuth setup would be disproportionate for a minimal internal API in a 1-week assessment, but the principle (writes require auth) is demonstrated.
+**Authentication**: a lightweight shared-secret API key (`X-API-Key` header) protects the write endpoint (`/import`). This is a deliberate scope choice — a full JWT/OAuth setup would be disproportionate for an internal API of this scope, but the principle (writes require auth) is demonstrated.
 
 **Pagination**: `/assets` defaults to 50 results, capped at 200, with `offset`/`limit` params, so a large inventory can't accidentally be returned in one unbounded response.
 
-**Migrations**: tables are created on app startup via `Base.metadata.create_all()` rather than a full Alembic migration setup. For a 1-week minimal-API task this is a reasonable scope cut; Alembic would be the next step for a production system with evolving schema.
+**Migrations**: tables are created on app startup via `Base.metadata.create_all()` rather than a full Alembic migration setup. Kept intentionally simple to match the scope of this project; Alembic would be the next step for a production system with evolving schema.
 
 ## The AI layer: design principle
 
@@ -78,7 +83,7 @@ This means every LLM call in the system is either (a) translating English into a
 
 ## Example prompts and outputs
 
-*All outputs below are real, recorded against this running deployment on 2026-06-27 using Gemini 2.5 Flash via `langchain-google-genai` (the project's LLM provider was swapped from Anthropic to Google after the original key proved to have no credit balance; the chain logic in `analysis_service.py` is provider-agnostic, so only the `_llm()` factory changed).*
+*All outputs below are real, recorded against this running deployment on 2026-06-27 using Gemini 2.5 Flash via `langchain-google-genai`. The LLM layer is intentionally provider-agnostic — only the `_llm()` factory in `analysis_service.py` is bound to a specific provider; the chain logic itself is not.*
 
 ### 1. Natural-language query
 
@@ -87,6 +92,8 @@ curl -X POST http://localhost:8000/analyze/query \
   -H "Content-Type: application/json" \
   -d '{"question": "show me all subdomains that are stale"}'
 ```
+
+![Structured response from /analyze/query](docs/structured_response.png)
 
 ```json
 {
@@ -184,8 +191,9 @@ Expected: `out_of_scope: true`, no matches returned. Confirms the LLM correctly 
 ## Known limitations / things I'd do differently with more time
 
 - Tag filtering happens in Python rather than at the SQL level, since `tags` is stored as a JSON column rather than a normalized join table. Fine at this dataset's scale; wouldn't scale to a large inventory without an index strategy change (e.g. Postgres JSONB + GIN index, or a proper `asset_tags` table).
-- No agentic tool-calling (the LLM calling functions to fetch its own data) — the bonus mentions this as optional. I deliberately scoped to a simpler, more reliably-grounded pattern (LLM-fills-schema, code-executes-query) given the time constraint, and because it's a stronger anti-hallucination guarantee than letting the LLM drive its own multi-step retrieval.
-- LangChain and FastAPI were both new to me going into this assessment — I focused the available time on getting the core data-handling and grounding logic right and well-tested, since that's where correctness matters most, rather than on UI polish or additional bonus features.
+- No agentic tool-calling (the LLM calling functions to fetch its own data). The project deliberately uses a simpler, more reliably-grounded pattern (LLM-fills-schema, code-executes-query). This is a stronger anti-hallucination guarantee than letting the LLM drive its own multi-step retrieval, at the cost of flexibility for more open-ended questions.
+- `EOL_TECHNOLOGIES` and `SENSITIVE_PORTS` are hardcoded constants in `analysis_service.py`. A real system would pull these from a maintained feed; the hardcoded set is a stated assumption for this project's scope.
+- Tables are created on startup via `Base.metadata.create_all()` rather than Alembic migrations. Fine while the schema is stable; a production system with evolving schema would use Alembic.
 
 ## Tech stack
 

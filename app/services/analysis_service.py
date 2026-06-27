@@ -1,21 +1,21 @@
 """
 LangChain analysis layer.
 
-CORE DESIGN PRINCIPLE (this is your anti-hallucination guardrail, and the
-thing to explain clearly in the README + interview):
+CORE DESIGN PRINCIPLE (this is the anti-hallucination guardrail, and is
+documented in detail in the README):
 
   The LLM is NEVER given write access to the database and is NEVER asked to
   "answer from memory." For every feature, the pattern is:
 
-    1. LLM's only job is to fill in a small structured schema
+    1. The LLM's only job is to fill in a small structured schema
        (e.g. AssetFilter) from natural language.
-    2. Your own Python code applies that schema against REAL rows fetched
+    2. Application code applies that schema against REAL rows fetched
        from Postgres.
     3. If the LLM needs to produce prose (a summary, a report), it is handed
        the real rows as context and instructed to summarize *only* what's in
        front of it — it never sees the full dataset or invents IDs.
 
-  This means the LLM is a translator and a narrator, never an oracle.
+  The LLM is a translator and a narrator, never an oracle.
 
 Swap-in note: this file uses langchain-google-genai. To switch provider, swap
 ChatGoogleGenerativeAI for the equivalent (ChatAnthropic from langchain_anthropic,
@@ -35,7 +35,7 @@ from app.schemas import AssetFilter
 
 # Known end-of-life / risky technologies for the risk-scoring feature.
 # A real system would pull this from a maintained feed; hardcoded here is a
-# stated, documented assumption for the scope of this task.
+# stated scope assumption (documented in the README).
 EOL_TECHNOLOGIES = {"php 5", "windows server 2008", "openssl 1.0", "tls 1.0", "tls 1.1"}
 SENSITIVE_PORTS = {"23/tcp": "telnet (unencrypted)", "21/tcp": "ftp (unencrypted)",
                     "3389/tcp": "rdp exposed", "445/tcp": "smb exposed"}

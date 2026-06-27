@@ -3,8 +3,8 @@ Tests for import/dedup/lifecycle logic.
 
 These use an in-memory SQLite DB instead of Postgres, swapping out
 app.database's engine — fast, no Docker required to run these. Note in the
-README that integration tests against real Postgres would be the next step;
-this is a deliberate scope decision for the time box.
+README that integration tests against real Postgres would be the next step
+for a production system; this is a deliberate scope choice for the project.
 """
 import pytest
 from sqlalchemy import create_engine

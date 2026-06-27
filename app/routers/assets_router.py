@@ -21,8 +21,7 @@ def list_assets(
 ):
     """
     List endpoint with filtering + pagination. Sane default limit (50, capped
-    at 200) so a large inventory doesn't return everything at once
-    (Section 7 edge case).
+    at 200) so a large inventory doesn't return everything at once.
 
     Note: tag filtering happens in Python because `tags` is a JSON column,
     not natively indexable for "contains" queries the way a normalized

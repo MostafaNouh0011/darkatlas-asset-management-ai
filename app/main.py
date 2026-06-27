@@ -12,8 +12,8 @@ from app.routers import import_router, assets_router, analysis_router
 async def lifespan(app: FastAPI):
     """
     Tables are created on startup rather than via a full Alembic migration
-    setup — a deliberate scope decision for a 1-week minimal-API track
-    (documented in the README; Alembic would be the production answer).
+    setup — a deliberate scope choice for this project (documented in the
+    README; Alembic would be the production answer for an evolving schema).
 
     Done in a lifespan hook, not at module import time, so `import app.main`
     stays safe in tests even when no live database is reachable yet (tests
