@@ -14,7 +14,9 @@ A minimal asset management API with a LangChain-powered analysis layer, built fo
 git clone <this-repo>
 cd buguard-asset-mgmt
 cp .env.example .env
-# edit .env and set ANTHROPIC_API_KEY (or swap to OPENAI_API_KEY, see note below)
+# edit .env and set GOOGLE_API_KEY (the project uses Gemini 2.5 Flash via
+# langchain-google-genai; to use a different provider, swap the import in
+# app/services/analysis_service.py — see the swap-in note at the top of that file)
 docker-compose up --build
 ```
 
@@ -76,43 +78,108 @@ This means every LLM call in the system is either (a) translating English into a
 
 ## Example prompts and outputs
 
-*(Run these against your own deployment with `/analyze/query`, `/analyze/risk`, etc., and paste your actual recorded outputs here before submission — this section should contain real output from your running system, not hypothetical examples. Below are the request shapes to use.)*
+*All outputs below are real, recorded against this running deployment on 2026-06-27 using Gemini 2.5 Flash via `langchain-google-genai` (the project's LLM provider was swapped from Anthropic to Google after the original key proved to have no credit balance; the chain logic in `analysis_service.py` is provider-agnostic, so only the `_llm()` factory changed).*
 
-**1. Natural-language query**
+### 1. Natural-language query
+
 ```bash
 curl -X POST http://localhost:8000/analyze/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "show me all certificates that have expired"}'
+  -d '{"question": "show me all subdomains that are stale"}'
 ```
 
-**2. Risk summary**
+```json
+{
+  "question": "show me all subdomains that are stale",
+  "filter_used": {
+    "type": "subdomain",
+    "status": "stale",
+    "tag_contains": null,
+    "value_contains": null,
+    "expiry_before": null
+  },
+  "out_of_scope": false,
+  "matches": []
+}
+```
+
+Gemini translated the English into a structured `AssetFilter` (`type=subdomain`, `status=stale`); my own code ran that filter against Postgres and returned the actual rows. The matches list is empty because `a4` (`staging.example.com`) had been re-seen by an earlier import and was flipped from `stale` → `active` per the documented lifecycle, so there are no stale subdomains in the dataset at the moment this was recorded. Re-importing a stale asset would surface it here.
+
+The LLM was never given the database — it can't hallucinate asset IDs it didn't see.
+
+### 2. Risk summary
+
 ```bash
 curl -X POST http://localhost:8000/analyze/risk \
   -H "Content-Type: application/json" \
   -d '{"asset_id": "a3"}'
 ```
 
-**3. Enrichment**
+```json
+{
+  "asset_id": "a3",
+  "findings": [
+    "Certificate for CN=api.example.com expired 541 days ago."
+  ],
+  "summary": "The certificate for `api.example.com` is expired. This certificate expired 541 days ago, indicating a significant lapse in certificate management that could lead to service disruptions or security warnings."
+}
+```
+
+The findings list is computed **deterministically** by `compute_risk_findings()` (expiry check against today's date) — the LLM only narrated the list it was handed. The summary cannot introduce a finding that wasn't already in the input, and cannot name an asset not in the input.
+
+### 3. Enrichment
+
 ```bash
 curl -X POST http://localhost:8000/analyze/enrich \
   -H "Content-Type: application/json" \
-  -d '{"asset_id": "a2"}'
+  -d '{"asset_id": "a4"}'
 ```
 
-**4. Report generation**
+```json
+{ "asset_id": "a4", "enrichment": { "environment": "staging", "category": "web service", "criticality": "medium" } }
+```
+
+Gemini correctly inferred `staging` from the asset's `staging` tag and `staging.example.com` naming pattern, and rated it `medium` criticality (lower than the `api.example.com` subdomain recorded earlier, which Gemini classified as `high`). Side-effect: the enrichment is written back to `asset_metadata` on the asset row, so subsequent reads of `/assets/a4` include the new fields:
+
+```json
+{
+  "id": "a4", "type": "subdomain", "value": "staging.example.com", "status": "active",
+  "tags": ["staging"],
+  "metadata": { "environment": "staging", "category": "web service", "criticality": "medium" }
+}
+```
+
+### 4. Report generation
+
 ```bash
 curl -X POST http://localhost:8000/analyze/report \
   -H "Content-Type: application/json" \
-  -d '{"status": "active"}'
+  -d '{"tag_contains": "prod"}'
 ```
 
-**Out-of-scope query (grounding check)**
+```json
+{
+  "asset_count": 4,
+  "risky_asset_count": 2,
+  "report": "**Security Inventory and Risk Report**\n\nThis report summarizes the current inventory of active production assets and highlights any pre-computed risk findings.\n\n**Total Active Production Assets: 4**\n\n---\n\n**Subdomains (1 total)**\n*   `api.example.com`\n    *   *No findings.*\n\n**Services (1 total)**\n*   `23/tcp`\n    *   **Finding:** Service 23/tcp is a sensitive exposure: telnet (unencrypted).\n\n**Technologies (1 total)**\n*   `PHP 5.6`\n    *   **Finding:** Technology PHP 5.6 matches a known end-of-life entry (php 5).\n\n**IP Addresses (1 total)**\n*   `203.0.113.10`\n    *   *No findings.*"
+}
+```
+
+The four prod-tagged assets (`api.example.com`, `23/tcp`, `PHP 5.6`, `203.0.113.10`) are filtered by Python before any LLM call. Deterministic findings (`compute_risk_findings()` per row) are then computed and handed to the LLM alongside the asset rows — Gemini only narrates the pre-computed findings, it doesn't infer them. The `risky_asset_count: 2` field lets a caller audit the report's claim (2 of 4 prod assets had pre-computed findings) without re-parsing the prose. This is the same grounding pattern `/analyze/risk` uses; without it, an earlier version of this endpoint consistently produced reports that said "no risk findings" even when obvious risks were in the data.
+
+### Out-of-scope query (grounding check)
+
 ```bash
 curl -X POST http://localhost:8000/analyze/query \
   -H "Content-Type: application/json" \
   -d '{"question": "what is the weather like today"}'
 ```
-Expected: `out_of_scope: true`, no matches returned.
+
+```json
+{ "question": "what is the weather like today", "filter_used": null, "out_of_scope": true, "matches": [], "message": "This question doesn't appear to be about asset data." }
+```
+
+Expected: `out_of_scope: true`, no matches returned. Confirms the LLM correctly declines to fabricate an answer when the question isn't about asset data.
 
 ## Known limitations / things I'd do differently with more time
 

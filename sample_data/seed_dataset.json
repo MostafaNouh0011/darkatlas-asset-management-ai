@@ -1,0 +1,52 @@
+[
+  {
+    "id": "a1", "type": "domain", "value": "example.com",
+    "status": "active", "source": "scan",
+    "tags": ["root"], "metadata": {}
+  },
+  {
+    "id": "a2", "type": "subdomain", "value": "api.example.com",
+    "status": "active", "source": "scan", "tags": ["prod"],
+    "metadata": {}, "parent": "a1"
+  },
+  {
+    "id": "a3", "type": "certificate", "value": "CN=api.example.com",
+    "status": "active", "source": "scan", "tags": [],
+    "metadata": { "issuer": "Let's Encrypt", "expires": "2025-01-02" },
+    "covers": "a2"
+  },
+  {
+    "id": "a4", "type": "subdomain", "value": "staging.example.com",
+    "status": "stale", "source": "scan", "tags": ["staging"],
+    "metadata": {}, "parent": "a1"
+  },
+  {
+    "id": "a5", "type": "service", "value": "23/tcp",
+    "status": "active", "source": "scan", "tags": ["prod"],
+    "metadata": { "banner": "telnetd" }
+  },
+  {
+    "id": "a6", "type": "technology", "value": "PHP 5.6",
+    "status": "active", "source": "scan", "tags": ["prod"],
+    "metadata": { "detected_on": "api.example.com" }
+  },
+  {
+    "id": "a7", "type": "certificate", "value": "CN=staging.example.com",
+    "status": "active", "source": "scan", "tags": [],
+    "metadata": { "issuer": "DigiCert", "expires": "2026-07-15" },
+    "covers": "a4"
+  },
+  {
+    "id": "a8", "type": "ip_address", "value": "203.0.113.10",
+    "status": "active", "source": "scan", "tags": ["prod"],
+    "metadata": {}
+  },
+  {
+    "type": "domain", "value": "missing-id-example.com",
+    "status": "active", "source": "scan", "tags": [], "metadata": {}
+  },
+  {
+    "id": "a9", "type": "not_a_real_type", "value": "broken.example.com",
+    "status": "active", "source": "scan", "tags": [], "metadata": {}
+  }
+]
