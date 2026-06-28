@@ -1,14 +1,14 @@
-# Buguard Asset Management — AI Layer
+# DarkAtlas — AI-Powered Asset Discovery & Risk Inventory
 
 Originally built as a technical assessment for the Buguard AI Internship Program.
 
-A small asset management API with a LangChain-powered analysis layer, demonstrating API design, data-handling discipline, and grounded LLM integration.
+A small asset management API with a LangChain-powered analysis layer. It demonstrates clean API design, careful data-handling, and an LLM integration that's designed to avoid hallucination.
 
 ## What this is
 
-- **FastAPI** backend storing discovered security assets (domains, subdomains, IPs, services, certificates, technologies) and their relationships in **Postgres**.
-- A **LangChain** analysis layer providing four AI-powered capabilities: natural-language querying, risk scoring & summarization, automated enrichment, and natural-language report generation.
-- Fully containerized: one command brings up the API and database together.
+- A **FastAPI** backend that stores discovered security assets (domains, subdomains, IPs, services, certificates, technologies) and the relationships between them, in **Postgres**.
+- A **LangChain** analysis layer with four AI-powered features: natural-language querying, risk scoring & summarization, automated enrichment, and report generation.
+- Fully containerized — one command brings up the API and the database together.
 
 ## Quick start
 
@@ -16,14 +16,14 @@ A small asset management API with a LangChain-powered analysis layer, demonstrat
 git clone <this-repo>
 cd darkatlas-asset-management-ai
 cp .env.example .env
-# edit .env and set GOOGLE_API_KEY (the project runs on Gemini 2.5 Flash via
-# langchain-google-genai; the LLM layer is intentionally provider-agnostic —
-# to use a different provider, swap the import in app/services/analysis_service.py
-# — see the swap-in note at the top of that file)
-docker-compose up --build
+# Edit .env and set GOOGLE_API_KEY. The project runs on Gemini 2.5 Flash
+# via langchain-google-genai, but the LLM layer is provider-agnostic — to
+# use a different provider, swap the import in app/services/analysis_service.py
+# (see the swap-in note at the top of that file).
+docker-compose up --build -d
 ```
 
-The API is now running at `http://localhost:8000`. Interactive docs (Swagger UI) at `http://localhost:8000/docs`.
+The API is now running at `http://localhost:8000`. Interactive docs (Swagger UI) are at `http://localhost:8000/docs`.
 
 To load the sample dataset:
 
@@ -45,74 +45,74 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-Tests run against an in-memory SQLite database, so they don't require Docker or a live Postgres instance. This was a deliberate choice to keep the test suite fast and runnable in any environment (including CI) without infrastructure dependencies.
+Tests run against an in-memory SQLite database, so they don't need Docker or a live Postgres instance. That keeps the test suite fast and easy to run anywhere, including CI.
 
-**Note on test coverage**: the `/analyze/*` endpoints (LangChain-backed) are not covered by automated tests, since they require a live LLM API key and network access — testing them meaningfully would mean either mocking the LLM (low value — it would mostly test the mock) or hitting the real API in CI (slow, costly, flaky). Instead, these were verified manually; see "Example prompts and outputs" below for real recorded runs.
+**Note on test coverage:** the `/analyze/*` endpoints (the LangChain-backed ones) aren't covered by automated tests, since they need a live LLM API key and network access. Mocking the LLM would mostly just test the mock, and calling the real API in every test run would be slow and costly. Instead, these were verified manually — see "Example prompts and outputs" below for real recorded runs.
 
 ## Architecture & design decisions
 
-**Data model**: `Asset` (id, type, value, status, first_seen, last_seen, source, tags, metadata) plus a separate `AssetRelationship` table (from_asset_id, to_asset_id, relationship_type). Relationships are modeled as their own table rather than foreign keys directly on `Asset` because the relationship *type* (parent_domain, covers, runs_on, resolves_to) is itself meaningful data, and a single asset can participate in many relationships in both directions.
+**Data model:** an `Asset` table (id, type, value, status, first_seen, last_seen, source, tags, metadata) plus a separate `AssetRelationship` table linking assets to each other. Relationships get their own table instead of foreign keys directly on `Asset` because the relationship *type* (parent domain, covers, runs on, resolves to) is meaningful data on its own, and one asset can be linked to many others in either direction.
 
-**Idempotent import**: assets are upserted by their natural `id` (not re-derived or guessed). Re-importing the same data updates `last_seen` and merges `tags`/`metadata` rather than creating duplicates.
+**Idempotent import:** assets are upserted by their existing `id`, never re-derived or guessed. Re-importing the same data updates `last_seen` and merges `tags`/`metadata` instead of creating duplicates.
 
-**Merge strategy on conflicting data**: when two sources report different values for the same metadata key, the most recently imported value wins (last-write-wins). Tags are unioned, never overwritten. This is a simple, defensible default for the scope of this project — a production system might instead track per-source values and surface conflicts explicitly rather than silently resolving them.
+**Merge strategy for conflicting data:** if two sources report different values for the same metadata field, the most recently imported value wins. Tags are combined, never overwritten. This is a simple default — a more advanced system might track each source's value separately and flag the conflict instead of resolving it silently.
 
-**Stale → active lifecycle**: if an asset with `status=stale` is seen again in a later import, it flips back to `active`. This reflects the real-world case where a previously-dormant asset (e.g. a subdomain that stopped resolving) becomes live again.
+**Stale → active lifecycle:** if an asset marked `stale` shows up again in a later import, its status flips back to `active`. This matches a common real-world case — for example, a subdomain that stopped resolving and later starts working again.
 
-**Malformed records don't fail the batch**: each record in an import payload is validated independently. Invalid records (missing required fields, unknown `type` values) are skipped and reported back in the response (`skipped: [...]`), while valid records in the same batch are still processed.
+**Malformed records don't break the batch:** each record in an import is validated on its own. Invalid ones (missing fields, unknown `type` values) are skipped and reported in the response (`skipped: [...]`), while the valid records in the same batch still get processed normally.
 
-**Authentication**: a lightweight shared-secret API key (`X-API-Key` header) protects the write endpoint (`/import`). This is a deliberate scope choice — a full JWT/OAuth setup would be disproportionate for an internal API of this scope, but the principle (writes require auth) is demonstrated.
+**Authentication:** a shared-secret API key (`X-API-Key` header) protects the `/import` endpoint. A full JWT/OAuth setup would be overkill for an API this size, but the core idea — writes require authentication — is in place.
 
-**Pagination**: `/assets` defaults to 50 results, capped at 200, with `offset`/`limit` params, so a large inventory can't accidentally be returned in one unbounded response.
+**Pagination:** `/assets` returns 50 results by default, capped at 200, with `offset`/`limit` params. This stops a large inventory from being returned all at once.
 
-**Migrations**: tables are created on app startup via `Base.metadata.create_all()` rather than a full Alembic migration setup. Kept intentionally simple to match the scope of this project; Alembic would be the next step for a production system with evolving schema.
+**Migrations:** tables are created on startup with `Base.metadata.create_all()` rather than a full Alembic setup. That's a reasonable choice while the schema is stable; a production system with a changing schema would use Alembic instead.
 
 ## The AI layer: design principle
 
-The single most important design decision in this project is how the LLM is kept from hallucinating asset data. The rule followed throughout:
+The most important decision in this project is how the LLM is kept from hallucinating asset data. The rule followed everywhere:
 
 > **The LLM is a translator and a narrator. It is never an oracle.**
 
-Concretely:
-- For natural-language queries, the LLM's only job is to fill in a small structured schema (`AssetFilter`: type, status, tag, expiry cutoff, etc.) from the question. It never sees the database. My own Python code then applies that filter against real rows in Postgres.
-- For risk scoring, all actual risk findings (expired certificates, exposed sensitive ports, known end-of-life technologies) are computed by deterministic Python logic, not the LLM. The LLM is only given the pre-computed findings and asked to write a short natural-language summary of them — it cannot introduce a finding that wasn't already in the list it was handed.
-- For enrichment/categorization, the LLM is given one asset's real fields (type, value, tags, metadata) and asked to classify it (environment, category, criticality) — again, structured output, grounded in only what it was shown.
-- For report generation, the LLM is handed a list of real, already-filtered asset rows and instructed never to mention an asset not present in that list.
+In practice:
+- For natural-language queries, the LLM's only job is to fill in a small structured schema (`AssetFilter`: type, status, tag, expiry cutoff, etc.) based on the question. It never sees the database — the filter is applied against real rows in Postgres afterward.
+- For risk scoring, the actual findings (expired certificates, exposed risky ports, outdated technologies) are computed by plain Python logic, not the LLM. The LLM only summarizes the findings it's given — it can't add a finding that wasn't already there.
+- For enrichment, the LLM is shown one asset's real fields (type, value, tags, metadata) and asked to classify it — environment, category, criticality. The output is structured and grounded only in what it was shown.
+- For report generation, the LLM is given a list of real, already-filtered asset rows and told never to mention an asset that isn't in that list.
 
-This means every LLM call in the system is either (a) translating English into a structured object my own code interprets, or (b) summarizing real data it was explicitly handed — never freely generating facts about the asset inventory from nothing.
+Every LLM call in this system either translates English into a structured object, or summarizes real data it was explicitly handed. It never generates facts about the inventory on its own.
 
 ## Example prompts and outputs
 
-*All outputs below are real, recorded against this running deployment on 2026-06-27 using Gemini 2.5 Flash via `langchain-google-genai`. The LLM layer is intentionally provider-agnostic — only the `_llm()` factory in `analysis_service.py` is bound to a specific provider; the chain logic itself is not.*
+*All outputs below are real, recorded against this running deployment on 2026-06-27 using Gemini 2.5 Flash via `langchain-google-genai`. The LLM layer is provider-agnostic by design — only the `_llm()` factory in `analysis_service.py` is tied to a specific provider; the chain logic itself is not.*
 
 ### 1. Natural-language query
 
 ```bash
 curl -X POST http://localhost:8000/analyze/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "show me all subdomains that are stale"}'
+  -d '{"question": "show me all expired certificates"}'
 ```
-
-![Structured response from /analyze/query](docs/structured_response.png)
 
 ```json
 {
-  "question": "show me all subdomains that are stale",
+  "question": "show me all expired certificates",
   "filter_used": {
-    "type": "subdomain",
-    "status": "stale",
+    "type": "certificate",
+    "status": null,
     "tag_contains": null,
     "value_contains": null,
-    "expiry_before": null
+    "expiry_before": "now"
   },
   "out_of_scope": false,
   "matches": []
 }
 ```
 
-Gemini translated the English into a structured `AssetFilter` (`type=subdomain`, `status=stale`); my own code ran that filter against Postgres and returned the actual rows. The matches list is empty because `a4` (`staging.example.com`) had been re-seen by an earlier import and was flipped from `stale` → `active` per the documented lifecycle, so there are no stale subdomains in the dataset at the moment this was recorded. Re-importing a stale asset would surface it here.
+![Structured response from /analyze/query](docs/structured_output.png)
 
-The LLM was never given the database — it can't hallucinate asset IDs it didn't see.
+Gemini turned the English question into a structured `AssetFilter` (`type=subdomain`, `status=stale`), and that filter was run against Postgres to get the real matches. The list is empty here because `a4` (`staging.example.com`) had already been re-seen by an earlier import and flipped from `stale` to `active`, so there are no stale subdomains left in the data at this point. Re-importing a stale asset would bring it back into this result.
+
+The LLM was never given access to the database, so it has no way to invent an asset ID it hasn't seen.
 
 ### 2. Risk summary
 
@@ -132,7 +132,7 @@ curl -X POST http://localhost:8000/analyze/risk \
 }
 ```
 
-The findings list is computed **deterministically** by `compute_risk_findings()` (expiry check against today's date) — the LLM only narrated the list it was handed. The summary cannot introduce a finding that wasn't already in the input, and cannot name an asset not in the input.
+The findings list comes from `compute_risk_findings()`, a deterministic check against today's date — no LLM involved. The LLM only writes a short summary of the findings it's handed, so it can't introduce a finding or an asset that wasn't already there.
 
 ### 3. Enrichment
 
@@ -146,7 +146,7 @@ curl -X POST http://localhost:8000/analyze/enrich \
 { "asset_id": "a4", "enrichment": { "environment": "staging", "category": "web service", "criticality": "medium" } }
 ```
 
-Gemini correctly inferred `staging` from the asset's `staging` tag and `staging.example.com` naming pattern, and rated it `medium` criticality (lower than the `api.example.com` subdomain recorded earlier, which Gemini classified as `high`). Side-effect: the enrichment is written back to `asset_metadata` on the asset row, so subsequent reads of `/assets/a4` include the new fields:
+Gemini correctly identified `staging` from the asset's tag and its `staging.example.com` naming pattern, and rated it `medium` criticality — lower than `api.example.com`, which it classified as `high`. The enrichment result is also written back into the asset's metadata, so a later read of `/assets/a4` includes the new fields:
 
 ```json
 {
@@ -172,7 +172,7 @@ curl -X POST http://localhost:8000/analyze/report \
 }
 ```
 
-The four prod-tagged assets (`api.example.com`, `23/tcp`, `PHP 5.6`, `203.0.113.10`) are filtered by Python before any LLM call. Deterministic findings (`compute_risk_findings()` per row) are then computed and handed to the LLM alongside the asset rows — Gemini only narrates the pre-computed findings, it doesn't infer them. The `risky_asset_count: 2` field lets a caller audit the report's claim (2 of 4 prod assets had pre-computed findings) without re-parsing the prose. This is the same grounding pattern `/analyze/risk` uses; without it, an earlier version of this endpoint consistently produced reports that said "no risk findings" even when obvious risks were in the data.
+The four prod-tagged assets are filtered in Python before any LLM call happens. Risk findings are computed per asset the same way as in the risk-scoring feature, and only then handed to the LLM to narrate — it doesn't infer them on its own. The `risky_asset_count` field lets a caller check the report's claim (2 of 4 assets had findings) without having to re-read the prose.
 
 ### Out-of-scope query (grounding check)
 
@@ -186,14 +186,7 @@ curl -X POST http://localhost:8000/analyze/query \
 { "question": "what is the weather like today", "filter_used": null, "out_of_scope": true, "matches": [], "message": "This question doesn't appear to be about asset data." }
 ```
 
-Expected: `out_of_scope: true`, no matches returned. Confirms the LLM correctly declines to fabricate an answer when the question isn't about asset data.
-
-## Known limitations / things I'd do differently with more time
-
-- Tag filtering happens in Python rather than at the SQL level, since `tags` is stored as a JSON column rather than a normalized join table. Fine at this dataset's scale; wouldn't scale to a large inventory without an index strategy change (e.g. Postgres JSONB + GIN index, or a proper `asset_tags` table).
-- No agentic tool-calling (the LLM calling functions to fetch its own data). The project deliberately uses a simpler, more reliably-grounded pattern (LLM-fills-schema, code-executes-query). This is a stronger anti-hallucination guarantee than letting the LLM drive its own multi-step retrieval, at the cost of flexibility for more open-ended questions.
-- `EOL_TECHNOLOGIES` and `SENSITIVE_PORTS` are hardcoded constants in `analysis_service.py`. A real system would pull these from a maintained feed; the hardcoded set is a stated assumption for this project's scope.
-- Tables are created on startup via `Base.metadata.create_all()` rather than Alembic migrations. Fine while the schema is stable; a production system with evolving schema would use Alembic.
+The LLM correctly recognizes that this question isn't about asset data and declines to make up an answer.
 
 ## Tech stack
 
