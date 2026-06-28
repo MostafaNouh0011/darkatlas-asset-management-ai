@@ -110,6 +110,7 @@ curl -X POST http://localhost:8000/analyze/query \
 
 ![Structured response from /analyze/query](docs/structured_output.png)
 
+
 Gemini turned the English question into a structured `AssetFilter` (`type=subdomain`, `status=stale`), and that filter was run against Postgres to get the real matches. The list is empty here because `a4` (`staging.example.com`) had already been re-seen by an earlier import and flipped from `stale` to `active`, so there are no stale subdomains left in the data at this point. Re-importing a stale asset would bring it back into this result.
 
 The LLM was never given access to the database, so it has no way to invent an asset ID it hasn't seen.
