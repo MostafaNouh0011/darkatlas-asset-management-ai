@@ -10,6 +10,10 @@ A small asset management API with a LangChain-powered analysis layer. It demonst
 - A **LangChain** analysis layer with four AI-powered features: natural-language querying, risk scoring & summarization, automated enrichment, and report generation.
 - Fully containerized — one command brings up the API and the database together.
 
+## Architecture Design
+
+![Architecture Design](docs/Architecture.png)
+
 ## Quick start
 
 ```bash
